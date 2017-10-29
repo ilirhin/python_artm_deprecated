@@ -2,23 +2,12 @@
 
 import numpy as np
 from numpy.core.umath_tests import inner1d
-import scipy
-import scipy.sparse
-from sklearn.datasets import fetch_20newsgroups
-import gensim
-from collections import Counter
-from collections import defaultdict
+from loss_functions import LogFunction
 import heapq
-import nltk
-import random
-from nltk.corpus import stopwords
 from sklearn.model_selection import cross_val_score
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 from sklearn.svm import SVC
-import matplotlib.pyplot as plt
-from sklearn.manifold import TSNE
-import time
 
 
 MAX_INNER1D_ELEMENTS = 500000000
@@ -57,16 +46,20 @@ def memory_efficient_inner1d(fst_arr, fst_indices, snd_arr, snd_indices):
     return result
 
 
-def create_calculate_likelihood_like_function(n_dw_matrix, loss_function=None):
-    if loss_function is None:
-        loss_function = LogFunction()
-
+def get_docptr(n_dw_matrix):
     D, W = n_dw_matrix.shape
     docptr = []
     indptr = n_dw_matrix.indptr
     for doc_num in xrange(D):
         docptr.extend([doc_num] * (indptr[doc_num + 1] - indptr[doc_num]))
-    docptr = np.array(docptr)
+    return np.array(docptr)
+
+
+def create_calculate_likelihood_like_function(n_dw_matrix, loss_function=None):
+    if loss_function is None:
+        loss_function = LogFunction()
+
+    docptr = get_docptr(n_dw_matrix)
     wordptr = n_dw_matrix.indices
     
     def fun(phi_matrix, theta_matrix):
@@ -74,301 +67,6 @@ def create_calculate_likelihood_like_function(n_dw_matrix, loss_function=None):
         return np.sum(n_dw_matrix.data * s_data)
 
     return fun
-
-
-def em_optimization(
-    n_dw_matrix, 
-    phi_matrix,
-    theta_matrix,
-    regularization_list,
-    iters_count=100,
-    loss_function=None,
-    iteration_callback=None,
-    const_phi=False,
-    params=None
-):
-    if loss_function is None:
-        loss_function = LogFunction()
-        
-    if params is None:
-        params = {}
-    return_counters = params.get('return_counters', False)
-
-    D, W = n_dw_matrix.shape
-    T = phi_matrix.shape[0]
-    phi_matrix = np.copy(phi_matrix)
-    theta_matrix = np.copy(theta_matrix)
-    docptr = []
-    indptr = n_dw_matrix.indptr
-    for doc_num in xrange(D):
-        docptr.extend([doc_num] * (indptr[doc_num + 1] - indptr[doc_num]))
-    docptr = np.array(docptr)
-    wordptr = n_dw_matrix.indices
-    
-    start_time = time.time()
-    for it in xrange(iters_count):
-        phi_matrix_tr = np.transpose(phi_matrix)
-        # следующая строчка это 60% времени работы алгоритма
-        s_data = loss_function.calc_der(memory_efficient_inner1d(theta_matrix, docptr, phi_matrix_tr, wordptr))
-        # следующая часть это 25% времени работы алгоритма
-        A = scipy.sparse.csr_matrix(
-            (
-                n_dw_matrix.data * s_data, 
-                n_dw_matrix.indices, 
-                n_dw_matrix.indptr
-            ), 
-            shape=n_dw_matrix.shape
-        )
-        A_tr = A.tocsc().transpose()
-        # Остальное это 15% времени
-        n_tw = np.transpose(A_tr.dot(theta_matrix)) * phi_matrix
-        n_dt = A.dot(phi_matrix_tr) * theta_matrix
-        
-        r_tw, r_dt = regularization_list[it](n_tw, n_dt)
-        n_tw += r_tw
-        n_dt += r_dt
-        n_tw[n_tw < 0] = 0
-        n_dt[n_dt < 0] = 0
-        
-        if not const_phi:
-            n_tw[np.sum(n_tw, axis=1) < 1e-20, :] += 1
-            phi_matrix = n_tw / np.sum(n_tw, axis=1)[:, np.newaxis]
-
-        n_dt[np.sum(n_dt, axis=1) < 1e-20, :] += 1
-        theta_matrix = n_dt / np.sum(n_dt, axis=1)[:, np.newaxis]
-        
-        if iteration_callback is not None:
-            iteration_callback(it, phi_matrix, theta_matrix)
-    
-    print 'Iters time', time.time() - start_time
-    
-    if return_counters:
-        return phi_matrix, theta_matrix, n_tw, n_dt
-    else:
-        return phi_matrix, theta_matrix
-
-
-def naive_thetaless_em_optimization(
-    n_dw_matrix, 
-    phi_matrix,
-    regularization_list,
-    iters_count=100,
-    iteration_callback=None,
-    theta_matrix=None,
-    params=None
-):
-    if params is None:
-        params = {}
-    return_counters = params.get('return_counters', False)
-
-    D, W = n_dw_matrix.shape
-    T = phi_matrix.shape[0]
-    phi_matrix = np.copy(phi_matrix)
-    docptr = []
-    indptr = n_dw_matrix.indptr
-    for doc_num in xrange(D):
-        docptr.extend([doc_num] * (indptr[doc_num + 1] - indptr[doc_num]))
-    docptr = np.array(docptr)
-    wordptr = n_dw_matrix.indices
-    
-    start_time = time.time()
-    for it in xrange(iters_count):
-        phi_rev_matrix = np.transpose(phi_matrix / np.sum(phi_matrix, axis=0))
-        theta_matrix = n_dw_matrix.dot(phi_rev_matrix)
-        
-        theta_matrix[np.sum(theta_matrix, axis=1) < 1e-20, :] += 1
-        theta_matrix /= np.sum(theta_matrix, axis=1)[:, np.newaxis]
-        phi_matrix_tr = np.transpose(phi_matrix)
-        
-        s_data = 1. / memory_efficient_inner1d(theta_matrix, docptr, phi_matrix_tr, wordptr)
-        A = scipy.sparse.csr_matrix(
-            (
-                n_dw_matrix.data  * s_data , 
-                n_dw_matrix.indices, 
-                n_dw_matrix.indptr
-            ), 
-            shape=n_dw_matrix.shape
-        ).tocsc()
-            
-        n_tw = (A.T.dot(theta_matrix)).T * phi_matrix
-        r_tw, _ = regularization_list[it](n_tw, theta_matrix)
-        n_tw += r_tw
-        n_tw[n_tw < 0] = 0
-        n_tw[np.sum(n_tw, axis=1) < 1e-20, :] += 1
-        phi_matrix = n_tw / np.sum(n_tw, axis=1)[:, np.newaxis]
-
-        if iteration_callback is not None:
-            iteration_callback(it, phi_matrix, theta_matrix)
-    
-    print 'Iters time', time.time() - start_time    
-    
-    if return_counters:
-        return phi_matrix, theta_matrix, n_tw, None
-    else:
-        return phi_matrix, theta_matrix
-
-
-def artm_thetaless_em_optimization(
-    n_dw_matrix, 
-    phi_matrix,
-    regularization_list,
-    iters_count=100,
-    iteration_callback=None,
-    theta_matrix=None,
-    params=None
-):
-    if params is None:
-        params = {}
-    use_B_cheat = params.get('use_B_cheat', False)
-    return_counters = params.get('return_counters', False)
-                             
-    D, W = n_dw_matrix.shape
-    T = phi_matrix.shape[0]
-    phi_matrix = np.copy(phi_matrix)
-    docptr = []
-    docsizes = []
-    indptr = n_dw_matrix.indptr
-    for doc_num in xrange(D):
-        size = indptr[doc_num + 1] - indptr[doc_num]
-        docptr.extend([doc_num] * size)
-        if use_B_cheat:
-            docsizes.extend([size] * size)
-        else:
-            docsizes.extend([np.sum(n_dw_matrix.data[indptr[doc_num]:indptr[doc_num + 1]])] * size)
-    docptr = np.array(docptr)
-    wordptr = n_dw_matrix.indices
-    docsizes = np.array(docsizes)
-    
-    B = scipy.sparse.csr_matrix(
-        (
-            1. * n_dw_matrix.data / docsizes, 
-            n_dw_matrix.indices, 
-            n_dw_matrix.indptr
-        ), 
-        shape=n_dw_matrix.shape
-    ).tocsc()
-    
-    start_time = time.time()
-    for it in xrange(iters_count):
-        word_norm = np.sum(phi_matrix, axis=0)
-        word_norm[word_norm == 0] = 1e-20
-        phi_rev_matrix = np.transpose(phi_matrix / word_norm)
-        
-        theta_matrix = n_dw_matrix.dot(phi_rev_matrix)
-        theta_matrix[np.sum(theta_matrix, axis=1) < 1e-20, :] += 1
-        theta_matrix /= np.sum(theta_matrix, axis=1)[:, np.newaxis]
-        phi_matrix_tr = np.transpose(phi_matrix)
-        
-        s_data = 1. / (memory_efficient_inner1d(theta_matrix, docptr, phi_matrix_tr, wordptr) + 1e-20)
-        A = scipy.sparse.csr_matrix(
-            (
-                n_dw_matrix.data  * s_data , 
-                n_dw_matrix.indices, 
-                n_dw_matrix.indptr
-            ), 
-            shape=n_dw_matrix.shape
-        ).tocsc()
-            
-        n_tw = A.T.dot(theta_matrix).T * phi_matrix
-        
-        r_tw, r_dt = regularization_list[it](n_tw, theta_matrix)
-        theta_indices = theta_matrix > 1e-10
-        r_dt[theta_indices] /= theta_matrix[theta_indices]
-        r_dt[~theta_indices] = 0.
-        
-        g_dt = A.dot(phi_matrix_tr) + r_dt
-        tmp = g_dt.T * B / word_norm
-        r_tw += (tmp - np.einsum('ij,ji->i', phi_rev_matrix, tmp)) * phi_matrix
-        
-        n_tw += r_tw
-        n_tw[n_tw < 1e-20] = 0
-
-        n_tw[np.sum(n_tw, axis=1) < 1e-20, :] += 1
-        phi_matrix = n_tw / np.sum(n_tw, axis=1)[:, np.newaxis]
-
-        if iteration_callback is not None:
-            iteration_callback(it, phi_matrix, theta_matrix)
-    
-    print 'Iters time', time.time() - start_time    
-    
-    if return_counters:
-        return phi_matrix, theta_matrix, n_tw, None
-    else:
-        return phi_matrix, theta_matrix
-
-
-def gradient_optimization(
-    n_dw_matrix, 
-    phi_matrix,
-    theta_matrix,
-    regularization_gradient_list,
-    iters_count=100,
-    loss_function=LogFunction(),
-    iteration_callback=None,
-    learning_rate=1.,
-    params=None
-):
-    if params is None:
-        params = {}
-    return_counters = params.get('return_counters', False)
-
-    D, W = n_dw_matrix.shape
-    T = phi_matrix.shape[0]
-    phi_matrix = np.copy(phi_matrix)
-    theta_matrix = np.copy(theta_matrix)
-    docptr = []
-    indptr = n_dw_matrix.indptr
-    for doc_num in xrange(D):
-        docptr.extend([doc_num] * (indptr[doc_num + 1] - indptr[doc_num]))
-    docptr = np.array(docptr)
-    wordptr = n_dw_matrix.indices
-    
-    start_time = time.time()
-    for it in xrange(iters_count):
-        phi_matrix_tr = np.transpose(phi_matrix)
-        # следующая строчка это 60% времени работы алгоритма
-        s_data = loss_function.calc_der(memory_efficient_inner1d(theta_matrix, docptr, phi_matrix_tr, wordptr))
-        # следующая часть это 25% времени работы алгоритма
-        A = scipy.sparse.csr_matrix(
-            (
-                n_dw_matrix.data * s_data, 
-                n_dw_matrix.indices, 
-                n_dw_matrix.indptr
-            ), 
-            shape=n_dw_matrix.shape
-        ).tocsc()
-        # Остальное это 15% времени
-        g_tw = theta_matrix.T * A
-        g_dt = A.dot(phi_matrix_tr)
-        
-        r_tw, r_dt = regularization_gradient_list[it](phi_matrix, theta_matrix)
-        g_tw += r_tw
-        g_dt += r_dt
-        
-        g_tw -= np.sum(g_tw * phi_matrix, axis=1)[:, np.newaxis]
-        g_dt -= np.sum(g_dt * theta_matrix, axis=1)[:, np.newaxis]
-        
-        phi_matrix += g_tw * learning_rate
-        theta_matrix += g_dt * learning_rate
-        
-        phi_matrix[phi_matrix < 0] = 0
-        theta_matrix[theta_matrix < 0] = 0
-        
-        phi_matrix[np.sum(phi_matrix, axis=1) < 1e-20, :] += 1
-        phi_matrix /= np.sum(phi_matrix, axis=1)[:, np.newaxis]
-        
-        theta_matrix[np.sum(theta_matrix, axis=1) < 1e-20, :] += 1
-        theta_matrix /= np.sum(theta_matrix, axis=1)[:, np.newaxis]
-        
-        if iteration_callback is not None:
-            iteration_callback(it, phi_matrix, theta_matrix)
-    
-    print 'Iters time', time.time() - start_time  
-    
-    if return_counters:
-        return phi_matrix, theta_matrix, n_tw, n_dt
-    else:
-        return phi_matrix, theta_matrix
 
 
 def svm_score(theta, targets, verbose=True):
