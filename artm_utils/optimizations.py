@@ -2,9 +2,9 @@
 
 import numpy as np
 import scipy.sparse
-from loss_functions import LogFunction
-from calculations import get_docptr
-from calculations import memory_efficient_inner1d
+from artm_utils.loss_functions import LogFunction
+from artm_utils.calculations import get_docptr
+from artm_utils.calculations import memory_efficient_inner1d
 import time
 
 """
