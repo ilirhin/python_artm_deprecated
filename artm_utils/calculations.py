@@ -2,7 +2,7 @@
 
 import numpy as np
 from numpy.core.umath_tests import inner1d
-from loss_functions import LogFunction
+from artm_utils.loss_functions import LogFunction
 import heapq
 from sklearn.model_selection import cross_val_score
 from sklearn.model_selection import train_test_split
