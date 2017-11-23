@@ -19,6 +19,17 @@ def load_data(data_path='~/data.npy', indices_path='~/indices.npy', indptr_path=
     return n_dw_matrix
 
 
+last_callback_time = time.time()
+
+
+def exp_callback(it, phi, theta):
+    global last_callback_time
+    print it, time.time() - last_callback_time
+    last_callback_time = time.time()
+    print '\tsparsity', 1. * np.sum(phi == 0) / np.sum(phi >= 0)
+    print '\ttheta_sparsity', 1. * np.sum(theta == 0) / np.sum(theta >= 0)
+
+
 def perform_experiment(n_dw_matrix, optimization_function, regularization_function, res_dir, seeds=[777], T=100, iters=60, params=None):
     if params is None:
         params = {}
@@ -34,21 +45,13 @@ def perform_experiment(n_dw_matrix, optimization_function, regularization_functi
         regularization_list = np.zeros(iters, dtype=object)
         regularization_list[:] = regularization_function
         
-        start = time.time()
-        def callback(it, phi, theta):
-            global start
-            print it, time.time() - start
-            start = time.time()
-            print '\tsparsity', 1. * np.sum(phi == 0) / np.sum(phi >= 0)
-            print '\ttheta_sparsity', 1. * np.sum(theta == 0) / np.sum(theta >= 0)
-
         phi, theta, n_tw, n_dt = optimization_function(
             n_dw_matrix=n_dw_matrix, 
             phi_matrix=phi_matrix,
             theta_matrix=theta_matrix,
             regularization_list=regularization_list,
             iters_count=iters,
-            iteration_callback=callback,
+            iteration_callback=exp_callback,
             params=params
         )
 

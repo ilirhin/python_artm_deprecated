@@ -8,6 +8,7 @@ from sklearn.model_selection import cross_val_score
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 from sklearn.svm import SVC
+import scipy.sparse
 
 
 MAX_INNER1D_ELEMENTS = 500000000
@@ -176,16 +177,45 @@ def artm_calc_perplexity_factory(n_dw_matrix):
     return lambda phi, theta: np.exp(- helper(phi, theta) / total_words_number)     
 
 
+def pairwise_counters_2_sparse_matrix(cooccurences):
+    row = []
+    col = []
+    data = []
+    for (w1, w2), value in cooccurences.iteritems():
+        row.append(w1)
+        col.append(w2)
+        data.append(value)
+    return scipy.sparse.csr_matrix((data, (row, col)))
+               
+
 def artm_calc_pmi_top_factory(doc_occurences, doc_cooccurences, documents_number, top_size):
     def fun(phi):
         T, W = phi.shape
         pmi = 0.
+        additive_smooth_constant = 1. / documents_number
         for t in xrange(T):
-            top = heapq.nlargest(top_size, xrange(W), key=lambda w: phi[t, w])
-            for w1 in top:
-                for w2 in top:
-                    if w1 != w2:
-                        pmi += np.log(documents_number * (doc_cooccurences.get((w1, w2), 0.) + 1e-4) * 1. / doc_occurences.get(w1, 0) / doc_occurences.get(w2, 0))
+            #top = heapq.nlargest(top_size, xrange(W), key=lambda w: phi[t, w])
+            top = np.argpartition(phi[t, :], -top_size)[-top_size:]
+            cooccurences = doc_cooccurences[top, :][:, top].todense()
+            occurences = doc_occurences[top]
+            values = np.log((cooccurences + additive_smooth_constant) * documents_number / occurences[:, np.newaxis] / occurences[np.newaxis, :])
+            pmi += values.sum() - values[np.diag_indices(len(values))].sum()
+        return pmi / (T * top_size * (top_size - 1))
+    return fun
+
+
+def artm_calc_positive_pmi_top_factory(doc_occurences, doc_cooccurences, documents_number, top_size):
+    def fun(phi):
+        T, W = phi.shape
+        pmi = 0.
+        additive_smooth_constant = 1. / documents_number
+        for t in xrange(T):
+            top = np.argpartition(phi[t, :], -top_size)[-top_size:]
+            cooccurences = doc_cooccurences[top, :][:, top].todense()
+            occurences = doc_occurences[top]
+            values = np.log((cooccurences + additive_smooth_constant) * documents_number / occurences[:, np.newaxis] / occurences[np.newaxis, :])
+            values[values < 0.] = 0.
+            pmi += values.sum() - values[np.diag_indices(len(values))].sum()
         return pmi / (T * top_size * (top_size - 1))
     return fun
 

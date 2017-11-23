@@ -72,7 +72,7 @@ def prepare_sklearn_dataset(dataset, calc_cooccurences=False, train_test_split=N
     }
 
     print 'Nonzero values:', len(data)
-    shape = (len(doc_targets), len(token_2_num))
+    shape = (not_empty_docs_number, len(token_2_num))
     if train_test_split is None:
         if calc_cooccurences:
             return (
@@ -115,7 +115,6 @@ def prepare_nips_dataset(dataset_path, calc_cooccurences=False, train_test_split
     row, col, data = [], [], []
     row_test, col_test, data_test = [], [], []
     not_empty_docs_number = 0
-    doc_targets = []
     doc_cooccurences = Counter()
     doc_occurences = Counter()
     random_gen = random.Random(42)
@@ -172,7 +171,7 @@ def prepare_nips_dataset(dataset_path, calc_cooccurences=False, train_test_split
                 doc_occurences.update(keys)
 
     print 'Nonzero values:', len(data)
-    shape = (len(doc_targets), len(token_2_num))
+    shape = (not_empty_docs_number, len(token_2_num))
 
     if train_test_split is None:
         if calc_cooccurences:

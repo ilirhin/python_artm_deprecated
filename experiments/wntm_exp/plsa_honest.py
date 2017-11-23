@@ -5,10 +5,12 @@ from artm_utils.optimizations import get_prob_matrix_by_counters
 
 
 def regularization_function(phi, theta, n_tw, n_dt):
-    theta_matrix = get_prob_matrix_by_counters(np.transpose(n_tw))
     n_w = np.sum(n_tw, axis=0)
+    phi_matrix = get_prob_matrix_by_counters(n_tw)
+    theta_matrix = get_prob_matrix_by_counters(np.transpose(phi_matrix))
 
-    ans = - n_w * theta_matrix / 2.
+    ans = - n_w * theta_matrix.T / 2.
+    print np.max(n_tw), np.min(ans)
     return ans, - n_dt  + np.transpose(n_tw + ans)
 
 n_dw_matrix = load_data()

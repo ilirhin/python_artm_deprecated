@@ -19,8 +19,8 @@ OPT_EPS = 1e-20
 
 def get_prob_matrix_by_counters(counters):
     res = np.copy(counters)
-    res[res < 0] = 0
-    res[np.sum(res, axis=1) < OPT_EPS, :] += 1
+    res[res < 0] = 0.
+    res[np.sum(res, axis=1) < OPT_EPS, :] = 1.
     res /= np.sum(res, axis=1)[:, np.newaxis]
     return res
 
