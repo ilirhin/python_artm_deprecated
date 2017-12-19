@@ -3,13 +3,14 @@
 import scipy
 import scipy.sparse
 import gensim
+import itertools
+import random
 from collections import Counter
 from collections import defaultdict
-import random
 from nltk.corpus import stopwords
 
 
-def prepare_sklearn_dataset(dataset, calc_cooccurences=False, train_test_split=None, token_2_num=None):
+def prepare_sklearn_dataset(dataset, calc_cooccurences=False, train_test_split=None, token_2_num=None, process_log_step=500):
     english_stopwords = set(stopwords.words('english'))
     is_token_2_num_provided = token_2_num is not None
 
@@ -21,8 +22,8 @@ def prepare_sklearn_dataset(dataset, calc_cooccurences=False, train_test_split=N
             tokens = gensim.utils.lemmatize(doc)
             for token in set(tokens):
                 occurences[token] += 1
-            if i % 500 == 0:
-                print 'Processed: ', i, 'documents from', len(dataset.data)
+            if i % process_log_step == 0:
+                print 'Preprocessed: ', i, 'documents from', len(dataset.data)
 
     row, col, data = [], [], []
     row_test, col_test, data_test = [], [], []
@@ -32,7 +33,7 @@ def prepare_sklearn_dataset(dataset, calc_cooccurences=False, train_test_split=N
     doc_occurences = Counter()
     random_gen = random.Random(42)
 
-    for doc, target in zip(dataset.data, dataset.target):
+    for i, (doc, target) in enumerate(itertools.izip(dataset.data, dataset.target)):
         tokens = gensim.utils.lemmatize(doc)
         cnt = Counter()
         cnt_test = Counter()
@@ -66,12 +67,14 @@ def prepare_sklearn_dataset(dataset, calc_cooccurences=False, train_test_split=N
                 doc_occurences.update(words)
                 doc_cooccurences.update({(w1, w2) for w1 in words for w2 in words if w1 != w2})
 
+        if i % process_log_step == 0:
+            print 'Processed: ', i, 'documents from', len(dataset.data)
+
     num_2_token = {
         v: k
         for k, v in token_2_num.iteritems()
     }
 
-    print 'Nonzero values:', len(data)
     shape = (not_empty_docs_number, len(token_2_num))
     if train_test_split is None:
         if calc_cooccurences:

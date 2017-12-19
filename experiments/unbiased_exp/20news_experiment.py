@@ -1,0 +1,424 @@
+#coding: utf-8
+import os
+from artm_utils.optimizations import *
+from artm_utils.calculations import *
+from artm_utils.dataset_preparations import *
+from artm_utils.regularizers import *
+
+from multiprocessing import Pool, Manager
+import pickle
+from sklearn.datasets import fetch_20newsgroups
+
+
+def perform_experiment((
+    T, iters_count, samples,
+    tau, theta_alpha, use_old_phi, 
+    params,
+    train_n_dw_matrix, test_n_dw_matrix,
+    doc_occurences, doc_cooccurences,
+    output_path
+)):
+    D, W = train_n_dw_matrix.shape
+
+    train_perplexities = []
+    test_perplexities = []
+    sparsities = []
+    theta_sparsities = []
+    topic_correlations = []
+    
+    avg_top5_pmis = []
+    avg_top10_pmis = []
+    avg_top20_pmis = []
+    avg_top30_pmis = []
+
+    avg_top5_ppmis = []
+    avg_top10_ppmis = []
+    avg_top20_ppmis = []
+    avg_top30_ppmis = []
+    
+    for seed in xrange(samples):
+        print seed
+        train_perplexity = []
+        test_perplexity = []
+        sparsity = []
+        theta_sparsity = []
+        topic_correlation = []
+        
+        avg_top5_pmi = []
+        avg_top10_pmi = []
+        avg_top20_pmi = []
+        avg_top30_pmi = []
+
+        avg_top5_ppmi = []
+        avg_top10_ppmi = []
+        avg_top20_ppmi = []
+        avg_top30_ppmi = []
+        
+        random_gen = np.random.RandomState(seed)
+        phi_matrix = get_prob_matrix_by_counters(random_gen.uniform(size=(T, W)).astype(np.float64))
+        theta_matrix = get_prob_matrix_by_counters(np.ones(shape=(D, T)).astype(np.float64))
+
+        regularization_list = np.zeros(iters_count, dtype=object)
+        regularization_list[:] = create_reg_decorr(tau=tau, theta_alpha=theta_alpha, use_old_phi=use_old_phi)
+
+        _train_perplexity = artm_calc_perplexity_factory(train_n_dw_matrix) 
+        _test_perplexity = artm_calc_perplexity_factory(test_n_dw_matrix)
+
+        _top5_pmi = artm_calc_pmi_top_factory(doc_occurences, doc_cooccurences, D, 5)
+        _top10_pmi = artm_calc_pmi_top_factory(doc_occurences, doc_cooccurences, D, 10)
+        _top20_pmi = artm_calc_pmi_top_factory(doc_occurences, doc_cooccurences, D, 20)
+        _top30_pmi = artm_calc_pmi_top_factory(doc_occurences, doc_cooccurences, D, 30)
+
+        _top5_ppmi = artm_calc_positive_pmi_top_factory(doc_occurences, doc_cooccurences, D, 5)
+        _top10_ppmi = artm_calc_positive_pmi_top_factory(doc_occurences, doc_cooccurences, D, 10)
+        _top20_ppmi = artm_calc_positive_pmi_top_factory(doc_occurences, doc_cooccurences, D, 20)
+        _top30_ppmi = artm_calc_positive_pmi_top_factory(doc_occurences, doc_cooccurences, D, 30)
+
+        def callback(it, phi, theta):
+            train_perplexity.append(_train_perplexity(phi, theta))
+            test_perplexity.append(_test_perplexity(phi, theta))
+            topic_correlation.append(artm_calc_topic_correlation(phi))
+            sparsity.append(1. * np.sum(phi == 0) / np.sum(phi >= 0))
+            theta_sparsity.append(1. * np.sum(theta == 0) / np.sum(theta >= 0))
+
+            avg_top5_pmi.append(_top5_pmi(phi))
+            avg_top10_pmi.append(_top10_pmi(phi))
+            avg_top20_pmi.append(_top20_pmi(phi))
+            avg_top30_pmi.append(_top30_pmi(phi))
+
+            avg_top5_ppmi.append(_top5_ppmi(phi))
+            avg_top10_ppmi.append(_top10_ppmi(phi))
+            avg_top20_ppmi.append(_top20_ppmi(phi))
+            avg_top30_ppmi.append(_top30_ppmi(phi))
+            
+        phi, theta = em_optimization(
+            n_dw_matrix=train_n_dw_matrix, 
+            phi_matrix=phi_matrix,
+            theta_matrix=theta_matrix,
+            regularization_list=regularization_list,
+            iters_count=iters_count,
+            iteration_callback=callback,
+            params=params
+        )
+
+        train_perplexities.append(train_perplexity)
+        test_perplexities.append(test_perplexity)
+        sparsities.append(sparsity)
+        theta_sparsities.append(theta_sparsity)
+        topic_correlations.append(topic_correlation)
+        
+        avg_top5_pmis.append(avg_top5_pmi)
+        avg_top10_pmis.append(avg_top10_pmi)
+        avg_top20_pmis.append(avg_top20_pmi)
+        avg_top30_pmis.append(avg_top30_pmi)
+        
+        avg_top5_ppmis.append(avg_top5_ppmi)
+        avg_top10_ppmis.append(avg_top10_ppmi)
+        avg_top20_ppmis.append(avg_top20_ppmi)
+        avg_top30_ppmis.append(avg_top30_ppmi)
+        
+    with open(output_path, 'w') as f:
+        pickle.dump({
+            'train_perplexities': train_perplexities,
+            'test_perplexities': test_perplexities,
+            'sparsities': sparsities,
+            'theta_sparsities': theta_sparsities,
+            'topic_correlations': topic_correlations,
+
+            'avg_top5_pmis': avg_top5_pmis,
+            'avg_top10_pmis': avg_top10_pmis,
+            'avg_top20_pmis': avg_top20_pmis,
+            'avg_top30_pmis': avg_top30_pmis,
+
+            'avg_top5_ppmis': avg_top5_ppmis,
+            'avg_top10_ppmis': avg_top10_ppmis,
+            'avg_top20_ppmis': avg_top20_ppmis,
+            'avg_top30_ppmis': avg_top30_ppmis
+        }, f)
+
+if __name__ == '__main__':
+    dataset = fetch_20newsgroups(
+        subset='all',
+        categories=[
+            'rec.autos',
+            'rec.motorcycles',
+            'rec.sport.baseball',
+            'rec.sport.hockey',
+            'sci.crypt',
+            'sci.electronics',
+            'sci.med',
+            'sci.space'
+        ],
+        remove=('headers', 'footers', 'quotes')
+    )
+
+    train_n_dw_matrix, test_n_dw_matrix, _, _, doc_targets, doc_occurences, doc_cooccurences = prepare_sklearn_dataset(dataset, calc_cooccurences=True, train_test_split=0.8)
+
+    D, W = train_n_dw_matrix.shape
+    doc_cooccurences = pairwise_counters_2_sparse_matrix(doc_cooccurences)
+    doc_occurences = np.array([doc_occurences[w] for w in xrange(W)])
+
+
+    args_list = [
+        (
+            10, 100, 100,
+            1000., 0., False,
+            {},
+            train_n_dw_matrix, test_n_dw_matrix,
+            doc_occurences, doc_cooccurences,
+            '20news_experiment/20news_10t_1000_0_False.pkl'
+        ),
+        (
+            10, 100, 100,
+            1000., 0., True,
+            {},
+            train_n_dw_matrix, test_n_dw_matrix,
+            doc_occurences, doc_cooccurences,
+            '20news_experiment/20news_10t_1000_0_True.pkl'
+        ),
+        (
+            10, 100, 100,
+            10000., 0., False,
+            {},
+            train_n_dw_matrix, test_n_dw_matrix,
+            doc_occurences, doc_cooccurences,
+            '20news_experiment/20news_10t_10000_0_False.pkl'
+        ),
+        (
+            10, 100, 100,
+            10000., 0., True,
+            {},
+            train_n_dw_matrix, test_n_dw_matrix,
+            doc_occurences, doc_cooccurences,
+            '20news_experiment/20news_10t_10000_0_True.pkl'
+        ),
+        (
+            10, 100, 100,
+            100000., 0., False,
+            {},
+            train_n_dw_matrix, test_n_dw_matrix,
+            doc_occurences, doc_cooccurences,
+            '20news_experiment/20news_10t_100000_0_False.pkl'
+        ),
+        (
+            10, 100, 100,
+            100000., 0., True,
+            {},
+            train_n_dw_matrix, test_n_dw_matrix,
+            doc_occurences, doc_cooccurences,
+            '20news_experiment/20news_10t_100000_0_True.pkl'
+        ),
+        (
+            10, 100, 100,
+            1000000., 0., False,
+            {},
+            train_n_dw_matrix, test_n_dw_matrix,
+            doc_occurences, doc_cooccurences,
+            '20news_experiment/20news_10t_1000000_0_False.pkl'
+        ),
+        (
+            10, 100, 100,
+            1000000., 0., True,
+            {},
+            train_n_dw_matrix, test_n_dw_matrix,
+            doc_occurences, doc_cooccurences,
+            '20news_experiment/20news_10t_1000000_0_True.pkl'
+        ),
+        (
+            10, 100, 100,
+            10000000., 0., False,
+            {},
+            train_n_dw_matrix, test_n_dw_matrix,
+            doc_occurences, doc_cooccurences,
+            '20news_experiment/20news_10t_10000000_0_False.pkl'
+        ),
+        (
+            10, 100, 100,
+            10000000., 0., True,
+            {},
+            train_n_dw_matrix, test_n_dw_matrix,
+            doc_occurences, doc_cooccurences,
+            '20news_experiment/20news_10t_10000000_0_True.pkl'
+        ),
+        (
+            10, 100, 100,
+            100000000., 0., False,
+            {},
+            train_n_dw_matrix, test_n_dw_matrix,
+            doc_occurences, doc_cooccurences,
+            '20news_experiment/20news_10t_100000000_0_False.pkl'
+        ),
+        (
+            10, 100, 100,
+            100000000., 0., True,
+            {},
+            train_n_dw_matrix, test_n_dw_matrix,
+            doc_occurences, doc_cooccurences,
+            '20news_experiment/20news_10t_100000000_0_True.pkl'
+        ),
+        (
+            10, 100, 100,
+            1000000000., 0., False,
+            {},
+            train_n_dw_matrix, test_n_dw_matrix,
+            doc_occurences, doc_cooccurences,
+            '20news_experiment/20news_10t_1000000000_0_False.pkl'
+        ),
+        (
+            10, 100, 100,
+            1000000000., 0., True,
+            {},
+            train_n_dw_matrix, test_n_dw_matrix,
+            doc_occurences, doc_cooccurences,
+            '20news_experiment/20news_10t_1000000000_0_True.pkl'
+        ),
+        (
+            10, 100, 100,
+            10000000000., 0., False,
+            {},
+            train_n_dw_matrix, test_n_dw_matrix,
+            doc_occurences, doc_cooccurences,
+            '20news_experiment/20news_10t_10000000000_0_False.pkl'
+        ),
+        (
+            10, 100, 100,
+            10000000000., 0., True,
+            {},
+            train_n_dw_matrix, test_n_dw_matrix,
+            doc_occurences, doc_cooccurences,
+            '20news_experiment/20news_10t_10000000000_0_True.pkl'
+        ),
+
+
+        (
+            30, 100, 100,
+            1000., 0., False,
+            {},
+            train_n_dw_matrix, test_n_dw_matrix,
+            doc_occurences, doc_cooccurences,
+            '20news_experiment/20news_30t_1000_0_False.pkl'
+        ),
+        (
+            30, 100, 100,
+            1000., 0., True,
+            {},
+            train_n_dw_matrix, test_n_dw_matrix,
+            doc_occurences, doc_cooccurences,
+            '20news_experiment/20news_30t_1000_0_True.pkl'
+        ),
+        (
+            30, 100, 100,
+            10000., 0., False,
+            {},
+            train_n_dw_matrix, test_n_dw_matrix,
+            doc_occurences, doc_cooccurences,
+            '20news_experiment/20news_30t_10000_0_False.pkl'
+        ),
+        (
+            30, 100, 100,
+            10000., 0., True,
+            {},
+            train_n_dw_matrix, test_n_dw_matrix,
+            doc_occurences, doc_cooccurences,
+            '20news_experiment/20news_30t_10000_0_True.pkl'
+        ),
+        (
+            30, 100, 100,
+            100000., 0., False,
+            {},
+            train_n_dw_matrix, test_n_dw_matrix,
+            doc_occurences, doc_cooccurences,
+            '20news_experiment/20news_30t_100000_0_False.pkl'
+        ),
+        (
+            30, 100, 100,
+            100000., 0., True,
+            {},
+            train_n_dw_matrix, test_n_dw_matrix,
+            doc_occurences, doc_cooccurences,
+            '20news_experiment/20news_30t_100000_0_True.pkl'
+        ),
+        (
+            30, 100, 100,
+            1000000., 0., False,
+            {},
+            train_n_dw_matrix, test_n_dw_matrix,
+            doc_occurences, doc_cooccurences,
+            '20news_experiment/20news_30t_1000000_0_False.pkl'
+        ),
+        (
+            30, 100, 100,
+            1000000., 0., True,
+            {},
+            train_n_dw_matrix, test_n_dw_matrix,
+            doc_occurences, doc_cooccurences,
+            '20news_experiment/20news_30t_1000000_0_True.pkl'
+        ),
+        (
+            30, 100, 100,
+            10000000., 0., False,
+            {},
+            train_n_dw_matrix, test_n_dw_matrix,
+            doc_occurences, doc_cooccurences,
+            '20news_experiment/20news_30t_10000000_0_False.pkl'
+        ),
+        (
+            30, 100, 100,
+            10000000., 0., True,
+            {},
+            train_n_dw_matrix, test_n_dw_matrix,
+            doc_occurences, doc_cooccurences,
+            '20news_experiment/20news_30t_10000000_0_True.pkl'
+        ),
+        (
+            30, 100, 100,
+            100000000., 0., False,
+            {},
+            train_n_dw_matrix, test_n_dw_matrix,
+            doc_occurences, doc_cooccurences,
+            '20news_experiment/20news_30t_100000000_0_False.pkl'
+        ),
+        (
+            30, 100, 100,
+            100000000., 0., True,
+            {},
+            train_n_dw_matrix, test_n_dw_matrix,
+            doc_occurences, doc_cooccurences,
+            '20news_experiment/20news_30t_100000000_0_True.pkl'
+        ),
+        (
+            30, 100, 100,
+            1000000000., 0., False,
+            {},
+            train_n_dw_matrix, test_n_dw_matrix,
+            doc_occurences, doc_cooccurences,
+            '20news_experiment/20news_30t_1000000000_0_False.pkl'
+        ),
+        (
+            30, 100, 100,
+            1000000000., 0., True,
+            {},
+            train_n_dw_matrix, test_n_dw_matrix,
+            doc_occurences, doc_cooccurences,
+            '20news_experiment/20news_30t_1000000000_0_True.pkl'
+        ),
+        (
+            30, 100, 100,
+            10000000000., 0., False,
+            {},
+            train_n_dw_matrix, test_n_dw_matrix,
+            doc_occurences, doc_cooccurences,
+            '20news_experiment/20news_30t_10000000000_0_False.pkl'
+        ),
+        (
+            30, 100, 100,
+            10000000000., 0., True,
+            {},
+            train_n_dw_matrix, test_n_dw_matrix,
+            doc_occurences, doc_cooccurences,
+            '20news_experiment/20news_30t_10000000000_0_True.pkl'
+        )   
+    ]
+
+    Pool(processes=8).map(perform_experiment, args_list)
+

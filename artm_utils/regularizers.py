@@ -1,17 +1,22 @@
 # coding: utf-8
 
 import numpy as np
+from optimizations import get_prob_matrix_by_counters
 
 
 def trivial_regularization(phi, theta, n_tw, n_dt):
     return np.zeros_like(n_tw), np.zeros_like(n_dt)
 
 
-def create_reg_decorr(tau, theta_alpha=0.):
+def create_reg_decorr(tau, phi_alpha=0., theta_alpha=0., use_old_phi=False):
     def fun(phi, theta, n_tw, n_dt):
-        phi_matrix = n_tw / np.sum(n_tw, axis=1)[:, np.newaxis]
-        aggr_phi = np.sum(phi_matrix, axis=1)
-        return - tau * np.transpose(phi_matrix * (aggr_phi[:, np.newaxis] - phi_matrix)), theta_alpha
+        T, _ = phi.shape
+        if not use_old_phi:
+            phi_matrix = get_prob_matrix_by_counters(n_tw)
+        else:
+            phi_matrix = phi
+        aggr_phi = np.sum(phi_matrix, axis=0)
+        return - 1. / (T - 1) / T * tau * phi_matrix * (aggr_phi - phi_matrix), theta_alpha
 
     return fun
 

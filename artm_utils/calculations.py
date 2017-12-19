@@ -188,34 +188,23 @@ def pairwise_counters_2_sparse_matrix(cooccurences):
     return scipy.sparse.csr_matrix((data, (row, col)))
                
 
-def artm_calc_pmi_top_factory(doc_occurences, doc_cooccurences, documents_number, top_size):
+def artm_calc_pmi_top_factory(doc_occurences, doc_cooccurences, documents_number, top_size, positive_pmi=False):
     def fun(phi):
         T, W = phi.shape
         pmi = 0.
         additive_smooth_constant = 1. / documents_number
         for t in xrange(T):
-            #top = heapq.nlargest(top_size, xrange(W), key=lambda w: phi[t, w])
             top = np.argpartition(phi[t, :], -top_size)[-top_size:]
             cooccurences = doc_cooccurences[top, :][:, top].todense()
             occurences = doc_occurences[top]
             values = np.log((cooccurences + additive_smooth_constant) * documents_number / occurences[:, np.newaxis] / occurences[np.newaxis, :])
+            if positive_pmi:
+                values[values < 0.] = 0.
             pmi += values.sum() - values[np.diag_indices(len(values))].sum()
         return pmi / (T * top_size * (top_size - 1))
     return fun
 
 
 def artm_calc_positive_pmi_top_factory(doc_occurences, doc_cooccurences, documents_number, top_size):
-    def fun(phi):
-        T, W = phi.shape
-        pmi = 0.
-        additive_smooth_constant = 1. / documents_number
-        for t in xrange(T):
-            top = np.argpartition(phi[t, :], -top_size)[-top_size:]
-            cooccurences = doc_cooccurences[top, :][:, top].todense()
-            occurences = doc_occurences[top]
-            values = np.log((cooccurences + additive_smooth_constant) * documents_number / occurences[:, np.newaxis] / occurences[np.newaxis, :])
-            values[values < 0.] = 0.
-            pmi += values.sum() - values[np.diag_indices(len(values))].sum()
-        return pmi / (T * top_size * (top_size - 1))
-    return fun
+    return artm_calc_pmi_top_factory(doc_occurences, doc_cooccurences, documents_number, top_size, positive_pmi=True)
 
