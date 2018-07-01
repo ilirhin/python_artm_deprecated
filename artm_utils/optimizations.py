@@ -101,7 +101,7 @@ def balanced_em_optimization(
     if params is None:
         params = {}
     return_counters = params.get('return_counters', False)
-    beta = params.get('beta', False)
+    beta = params.get('beta', 1.)
 
     phi_matrix = np.copy(phi_matrix)
     theta_matrix = np.copy(theta_matrix)
@@ -122,7 +122,7 @@ def balanced_em_optimization(
             ),
             shape=n_dw_matrix.shape
         )
-        n_t = (A.dot(phi_matrix_tr) * theta_matrix).sum(axis=0)
+        n_t = (A.dot(phi_matrix_tr) * theta_matrix).sum(axis=0) ** beta
 
         normalized_theta_matrix = theta_matrix / n_t
         s_data = loss_function.calc_der(memory_efficient_inner1d(normalized_theta_matrix, docptr, phi_matrix_tr, wordptr))
