@@ -84,6 +84,78 @@ def em_optimization(
         return phi_matrix, theta_matrix
 
 
+def balanced_em_optimization(
+    n_dw_matrix,
+    phi_matrix,
+    theta_matrix,
+    regularization_list,
+    iters_count=100,
+    loss_function=None,
+    iteration_callback=None,
+    const_phi=False,
+    params=None,
+):
+    if loss_function is None:
+        loss_function = LogFunction()
+
+    if params is None:
+        params = {}
+    return_counters = params.get('return_counters', False)
+    beta = params.get('beta', False)
+
+    phi_matrix = np.copy(phi_matrix)
+    theta_matrix = np.copy(theta_matrix)
+
+    docptr = get_docptr(n_dw_matrix)
+    wordptr = n_dw_matrix.indices
+
+    start_time = time.time()
+    for it in xrange(iters_count):
+        phi_matrix_tr = np.transpose(phi_matrix)
+
+        s_data = loss_function.calc_der(memory_efficient_inner1d(theta_matrix, docptr, phi_matrix_tr, wordptr))
+        A = scipy.sparse.csr_matrix(
+            (
+                n_dw_matrix.data * s_data,
+                n_dw_matrix.indices,
+                n_dw_matrix.indptr
+            ),
+            shape=n_dw_matrix.shape
+        )
+        n_t = (A.dot(phi_matrix_tr) * theta_matrix).sum(axis=0)
+
+        normalized_theta_matrix = theta_matrix / n_t
+        s_data = loss_function.calc_der(memory_efficient_inner1d(normalized_theta_matrix, docptr, phi_matrix_tr, wordptr))
+        A = scipy.sparse.csr_matrix(
+            (
+                n_dw_matrix.data * s_data,
+                n_dw_matrix.indices,
+                n_dw_matrix.indptr
+            ),
+            shape=n_dw_matrix.shape
+        )
+        n_dt = A.dot(phi_matrix_tr) * normalized_theta_matrix
+        n_tw = np.transpose(A.tocsc().transpose().dot(normalized_theta_matrix)) * phi_matrix
+
+        r_tw, r_dt = regularization_list[it](phi_matrix, theta_matrix, n_tw, n_dt)
+        n_tw += r_tw
+        n_dt += r_dt
+
+        if not const_phi:
+            phi_matrix = get_prob_matrix_by_counters(n_tw)
+        theta_matrix = get_prob_matrix_by_counters(n_dt)
+
+        if iteration_callback is not None:
+            iteration_callback(it, phi_matrix, theta_matrix)
+
+    print 'Iters time', time.time() - start_time
+
+    if return_counters:
+        return phi_matrix, theta_matrix, n_tw, n_dt
+    else:
+        return phi_matrix, theta_matrix
+
+
 def naive_thetaless_em_optimization(
         n_dw_matrix,
         phi_matrix,
